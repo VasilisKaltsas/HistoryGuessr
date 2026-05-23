@@ -1,0 +1,1560 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HistoGuessr</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0d1b2a;
+      --panel: rgba(11, 25, 42, 0.92);
+      --accent: #c9a84c;
+      --accent-strong: #d4b76c;
+      --muted: #7ea5b0;
+      --text: #e8e0d0;
+      --text-soft: #b8b2a5;
+      --shadow: 0 30px 70px rgba(0, 0, 0, 0.4);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      font-family: 'Inter', sans-serif;
+      background: radial-gradient(circle at top, rgba(57, 107, 141, 0.18), transparent 30%), var(--bg);
+      color: var(--text);
+      overflow: hidden;
+    }
+
+    body {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+
+    #app {
+      position: relative;
+      flex: 1;
+      display: grid;
+      overflow: hidden;
+    }
+
+    #map {
+      width: 100%;
+      height: 100%;
+      transition: filter 0.25s ease;
+      filter: saturate(1.3) contrast(1.1);
+    }
+
+    .overlay-card {
+      position: absolute;
+      z-index: 1000;
+      background: var(--panel);
+      border: 1px solid rgba(232, 224, 208, 0.1);
+      border-radius: 24px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(16px);
+      color: var(--text);
+      padding: 22px;
+      max-width: min(520px, calc(100vw - 40px));
+      opacity: 0;
+      transform: translateY(18px);
+      animation: fadeInUp 0.5s ease forwards;
+    }
+
+    .card-title {
+      font-family: 'Playfair Display', serif;
+      font-size: 1.5rem;
+      margin: 0 0 12px;
+      letter-spacing: 0.02em;
+    }
+
+    .card-text {
+      margin: 0;
+      line-height: 1.7;
+      color: var(--text-soft);
+      font-size: 0.96rem;
+      white-space: pre-line;
+    }
+
+    .home-options {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      margin-bottom: 24px;
+      text-align: left;
+    }
+
+    .option-group {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .option-group-label {
+      font-size: 0.8rem;
+      color: var(--text-soft);
+      font-weight: 600;
+      min-width: 72px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .opt-btns {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .opt-btn {
+      border: 1px solid rgba(232,224,208,0.15);
+      border-radius: 999px;
+      background: rgba(255,255,255,0.05);
+      color: var(--text-soft);
+      font-size: 0.85rem;
+      font-weight: 600;
+      padding: 7px 16px;
+      cursor: pointer;
+      transition: background 0.2s, color 0.2s, border-color 0.2s;
+      font-family: 'Inter', sans-serif;
+    }
+
+    .opt-btn:hover {
+      background: rgba(201,168,76,0.1);
+      color: var(--text);
+    }
+
+    .opt-btn.active {
+      background: rgba(201,168,76,0.2);
+      color: var(--accent);
+      border-color: rgba(201,168,76,0.45);
+    }
+
+    #game-mode-badge {
+      font-size: 0.78rem;
+      color: var(--text-soft);
+      padding: 3px 10px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(232,224,208,0.08);
+      white-space: nowrap;
+    }
+
+    #event-card {
+      position: absolute;
+      z-index: 1000;
+      left: 24px;
+      bottom: 130px;
+      width: 420px;
+      max-width: calc(100vw - 40px);
+      perspective: 1200px;
+    }
+
+    #event-card-inner {
+      position: relative;
+      transform-style: preserve-3d;
+      transition: transform 0.6s cubic-bezier(0.4, 0.2, 0.2, 1);
+    }
+
+    #event-card-inner.flipped {
+      transform: rotateY(180deg);
+    }
+
+    .card-face {
+      background: var(--panel);
+      border: 1px solid rgba(232, 224, 208, 0.1);
+      border-radius: 24px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(16px);
+      color: var(--text);
+      padding: 22px;
+      backface-visibility: hidden;
+      -webkit-backface-visibility: hidden;
+    }
+
+    #event-card-front {
+      opacity: 0;
+      animation: fadeInUp 0.5s ease forwards;
+    }
+
+    #event-card-back {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      min-height: 100%;
+      transform: rotateY(180deg);
+      box-sizing: border-box;
+      cursor: pointer;
+    }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .card-header .card-title {
+      margin: 0;
+      flex: 1;
+    }
+
+    .hint-btn {
+      background: rgba(201, 168, 76, 0.15);
+      border: 1px solid rgba(201, 168, 76, 0.3);
+      border-radius: 10px;
+      padding: 5px 10px;
+      font-size: 1rem;
+      line-height: 1.3;
+      cursor: pointer;
+      transition: background 0.2s, opacity 0.2s;
+      flex-shrink: 0;
+      color: inherit;
+    }
+
+    .hint-btn:hover:not(:disabled) {
+      background: rgba(201, 168, 76, 0.3);
+    }
+
+    .hint-btn:disabled {
+      opacity: 0.2;
+      cursor: default;
+    }
+
+    .hint-item {
+      background: rgba(201, 168, 76, 0.08);
+      border-left: 3px solid var(--accent);
+      border-radius: 0 8px 8px 0;
+      padding: 10px 12px;
+      margin-bottom: 8px;
+      font-size: 0.9rem;
+      color: var(--text-soft);
+      line-height: 1.5;
+    }
+
+    .hint-item-label {
+      font-size: 0.7rem;
+      font-weight: 700;
+      color: var(--accent);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    #results-card {
+      right: 24px;
+      top: 24px;
+      bottom: 24px;
+      width: min(420px, calc(100vw - 40px));
+      display: none;
+      max-height: calc(100vh - 48px);
+      overflow-y: auto;
+      overflow-x: hidden;
+    }
+
+    #results-card.visible {
+      display: block;
+    }
+
+    #results-card img {
+      width: 100%;
+      border-radius: 18px;
+      margin-bottom: 14px;
+      min-height: 180px;
+      object-fit: cover;
+      background: #102936;
+    }
+
+    #progress-bar {
+      position: absolute;
+      left: 24px;
+      top: 24px;
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      padding: 10px 16px;
+      border-radius: 999px;
+      background: rgba(11, 25, 42, 0.9);
+      border: 1px solid rgba(232, 224, 208, 0.08);
+    }
+
+    #score-badge {
+      margin-left: auto;
+      color: var(--accent);
+    }
+
+    #start-screen {
+      position: absolute;
+      inset: 0;
+      z-index: 1100;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(13, 27, 42, 0.95);
+      padding: 24px;
+    }
+
+    #start-screen .home-card {
+      width: min(540px, 100%);
+      text-align: center;
+      padding: 42px 32px;
+      border-radius: 32px;
+      background: rgba(11, 25, 42, 0.98);
+      border: 1px solid rgba(232, 224, 208, 0.12);
+      box-shadow: var(--shadow);
+    }
+
+    #start-screen h1 {
+      font-family: 'Playfair Display', serif;
+      font-size: clamp(2.8rem, 5vw, 4rem);
+      margin: 0 0 18px;
+      letter-spacing: 0.02em;
+    }
+
+    #start-screen p {
+      margin: 0;
+      color: var(--text-soft);
+      line-height: 1.7;
+      font-size: 1rem;
+      margin-bottom: 28px;
+    }
+
+    #start-screen .home-actions {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 14px;
+    }
+
+    #start-screen .home-actions button {
+      min-width: 160px;
+      border: none;
+      border-radius: 999px;
+      background: var(--accent);
+      color: #0d1b2a;
+      font-weight: 700;
+      font-size: 0.98rem;
+      padding: 16px 20px;
+      cursor: pointer;
+      transition: transform 0.2s ease, opacity 0.2s ease;
+    }
+
+    #start-screen .home-actions button.language {
+      background: rgba(255,255,255,0.08);
+      color: var(--text);
+    }
+
+    #timeline-panel {
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      bottom: 24px;
+      width: min(92vw, 720px);
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding: 18px 20px;
+      border-radius: 24px;
+      background: rgba(11, 25, 42, 0.94);
+      border: 1px solid rgba(232, 224, 208, 0.08);
+    }
+
+    .slider-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .slider-label {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.95rem;
+      color: var(--text-soft);
+    }
+
+    #year-label {
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    #year-slider {
+      width: 100%;
+      accent-color: var(--accent);
+      appearance: none;
+      height: 10px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--accent) 0%, rgba(201,168,76,0.25) 100%);
+      outline: none;
+      margin: 0;
+    }
+
+    #year-slider::-webkit-slider-thumb {
+      appearance: none;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      border: 2px solid #e8e0d0;
+      background: var(--accent);
+      cursor: pointer;
+      box-shadow: 0 0 0 6px rgba(201,168,76,0.12);
+    }
+
+    #confirm-panel {
+      position: absolute;
+      right: 24px;
+      bottom: 24px;
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 180px;
+      min-height: 60px;
+      border-radius: 999px;
+      background: rgba(27, 73, 101, 0.96);
+      border: 1px solid rgba(232, 224, 208, 0.08);
+      box-shadow: 0 24px 40px rgba(0, 0, 0, 0.24);
+    }
+
+    #confirm-button {
+      width: 100%;
+      border: none;
+      background: var(--accent);
+      color: #0d1b2a;
+      font-weight: 700;
+      font-size: 1rem;
+      padding: 16px 22px;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: transform 0.2s ease, opacity 0.2s ease;
+    }
+
+    #confirm-button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: scale(0.98);
+    }
+
+    #final-screen {
+      position: absolute;
+      inset: 0;
+      z-index: 1100;
+      background: rgba(13, 27, 42, 0.94);
+      backdrop-filter: blur(12px);
+      display: none;
+      justify-content: center;
+      align-items: center;
+      padding: 24px;
+      text-align: center;
+    }
+
+    #final-screen.visible {
+      display: flex;
+    }
+
+    .final-card {
+      background: rgba(11, 25, 42, 0.96);
+      border: 1px solid rgba(232, 224, 208, 0.12);
+      border-radius: 28px;
+      padding: 36px;
+      max-width: 560px;
+      width: 100%;
+      box-shadow: var(--shadow);
+    }
+
+    .final-card h1 {
+      margin: 0 0 16px;
+      font-family: 'Playfair Display', serif;
+      font-size: clamp(2rem, 4vw, 3rem);
+      letter-spacing: 0.01em;
+    }
+
+    .final-card p {
+      margin: 0 0 24px;
+      color: var(--text-soft);
+      line-height: 1.7;
+      font-size: 1rem;
+    }
+
+    .final-card button {
+      border: none;
+      background: var(--accent);
+      color: #0d1b2a;
+      padding: 16px 28px;
+      border-radius: 999px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: transform 0.2s ease;
+    }
+
+    .final-card button:hover {
+      transform: translateY(-1px);
+    }
+
+    .stat-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-top: 22px;
+    }
+
+    .stat-card {
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 18px;
+      padding: 18px;
+    }
+
+    .stat-card strong {
+      display: block;
+      font-size: 1.5rem;
+      margin-bottom: 6px;
+      color: var(--accent);
+    }
+
+    .loading-overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 1050;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(13, 27, 42, 0.9);
+      color: var(--text);
+      font-size: 1rem;
+      text-align: center;
+      padding: 24px;
+      backdrop-filter: blur(6px);
+    }
+
+    .loading-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      margin: 0 4px;
+      background: var(--accent);
+      border-radius: 50%;
+      animation: bounce 1s infinite ease-in-out;
+    }
+
+    .loading-dot:nth-child(2) { animation-delay: 0.1s; }
+    .loading-dot:nth-child(3) { animation-delay: 0.2s; }
+    .actual-pin {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: #e63946;
+      border: 3px solid #fff;
+      box-shadow: 0 0 0 2px rgba(0,0,0,0.5), 0 0 14px rgba(230,57,70,0.8);
+    }
+
+    .player-pin {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: #2196f3;
+      border: 3px solid #fff;
+      box-shadow: 0 0 0 2px rgba(0,0,0,0.5), 0 0 14px rgba(33,150,243,0.8);
+    }
+    @keyframes fadeInUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes bounce {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-8px); }
+    }
+
+    @keyframes timer-pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    #timer-wrap {
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      min-width: 68px;
+    }
+
+    #timer-text {
+      font-size: 0.95rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      color: var(--text);
+      transition: color 0.4s;
+    }
+
+    #timer-text.urgent {
+      animation: timer-pulse 0.7s ease-in-out infinite;
+    }
+
+    #timer-bar-track {
+      width: 100%;
+      height: 3px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+
+    #timer-bar {
+      height: 100%;
+      width: 100%;
+      background: var(--accent);
+      border-radius: 2px;
+      transition: width 1s linear, background 0.5s;
+    }
+
+    @media (max-width: 900px) {
+      #event-card, #results-card {
+        width: calc(100vw - 32px);
+        left: 50%;
+        transform: translateX(-50%);
+        right: auto;
+      }
+      #results-card {
+        bottom: 190px;
+      }
+      #confirm-panel {
+        left: 50%;
+        transform: translateX(-50%);
+        right: auto;
+      }
+      #progress-bar {
+        left: 50%;
+        transform: translateX(-50%);
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="map"></div>
+
+    <div id="start-screen">
+      <div class="home-card overlay-card">
+        <h1>HistoGuessr</h1>
+        <p id="home-subtitle">Επιλέξτε γλώσσα και ξεκινήστε την ιστορική σας περιπέτεια.</p>
+        <div class="home-options">
+          <div class="option-group">
+            <span class="option-group-label" id="label-difficulty">Difficulty</span>
+            <div class="opt-btns">
+              <button class="opt-btn" id="opt-easy">Easy</button>
+              <button class="opt-btn active" id="opt-medium">Medium</button>
+              <button class="opt-btn" id="opt-hard">Hard</button>
+            </div>
+          </div>
+          <div class="option-group">
+            <span class="option-group-label" id="label-style">Style</span>
+            <div class="opt-btns">
+              <button class="opt-btn active" id="opt-story">Story</button>
+              <button class="opt-btn" id="opt-clues">Clues</button>
+            </div>
+          </div>
+          <div class="option-group">
+            <span class="option-group-label" id="label-timelimit">Time</span>
+            <div class="opt-btns">
+              <button class="opt-btn" id="opt-time-45">45s</button>
+              <button class="opt-btn" id="opt-time-60">1 min</button>
+              <button class="opt-btn" id="opt-time-90">1:30</button>
+              <button class="opt-btn" id="opt-time-120">2 min</button>
+              <button class="opt-btn active" id="opt-time-none">No limit</button>
+            </div>
+          </div>
+        </div>
+        <div class="home-actions">
+          <button id="home-language-toggle" class="language">EN</button>
+          <button id="start-button">Ξεκίνα</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="progress-bar">
+      <span><span id="round-label">Round</span> <strong id="round-number">1</strong> <span id="round-of">of</span> 5</span>
+      <span id="score-badge">Score: 0</span>
+      <span id="game-mode-badge">Medium · Story</span>
+      <div id="timer-wrap" style="display:none;">
+        <span id="timer-text">1:30</span>
+        <div id="timer-bar-track"><div id="timer-bar"></div></div>
+      </div>
+      <button id="language-toggle" style="margin-left: auto; border: none; background: rgba(201,168,76,0.2); color: var(--accent); padding: 6px 14px; border-radius: 999px; font-weight: 600; font-size: 0.85rem; cursor: pointer; transition: background 0.2s;">EN</button>
+    </div>
+
+    <div id="event-card">
+      <div id="event-card-inner">
+        <div id="event-card-front" class="card-face">
+          <div class="card-header">
+            <h2 class="card-title" id="event-card-title">Your mission</h2>
+            <button id="hint-btn" class="hint-btn" title="Get a hint">💡</button>
+          </div>
+          <p id="event-description" class="card-text">Loading an immersive historical scene...</p>
+        </div>
+        <div id="event-card-back" class="card-face">
+          <div class="card-header">
+            <h2 class="card-title" id="hints-title">Hints</h2>
+            <button id="hint-btn-back" class="hint-btn" title="Next hint">💡</button>
+          </div>
+          <div id="hints-content"></div>
+          <p id="hint-counter" style="font-size:0.8rem;color:var(--text-soft);text-align:right;margin:10px 0 0;">0 / 3</p>
+          <p id="hint-penalty-notice" style="display:none;font-size:0.78rem;color:#e67d7d;text-align:right;margin:2px 0 0;"></p>
+        </div>
+      </div>
+    </div>
+
+    <div id="results-card" class="overlay-card">
+      <div id="results-content"></div>
+    </div>
+
+    <div id="timeline-panel">
+      <div class="slider-row">
+        <div class="slider-label"><span>Choose the year</span></div>
+        <div class="slider-label"><span id="year-label">2026 AD</span></div>
+      </div>
+      <input id="year-slider" type="range" min="-3000" max="2026" value="2026" />
+      <div class="slider-row">
+        <span>3000 BC</span>
+        <span>2026 AD</span>
+      </div>
+    </div>
+
+    <div id="confirm-panel">
+      <button id="confirm-button" disabled>Confirm guess</button>
+    </div>
+
+    <div id="final-screen">
+      <div class="final-card">
+        <h1>HistoGuessr Complete</h1>
+        <p>You completed the expedition. Your final tally measures how close you came to the true place and era of history's moments.</p>
+        <div class="stat-row">
+          <div class="stat-card"><strong id="final-score">0</strong>Total Points</div>
+          <div class="stat-card"><strong id="average-score">0</strong>Avg per Round</div>
+        </div>
+        <button id="restart-button">Play again</button>
+      </div>
+    </div>
+
+    <div id="loading" class="loading-overlay" style="display: none;">
+      <div>
+        <div>Fetching your next historical scene</div>
+        <div style="margin-top: 14px;">
+          <span class="loading-dot"></span>
+          <span class="loading-dot"></span>
+          <span class="loading-dot"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const TRANSLATIONS = {
+      en: {
+        round: "Round",
+        of: "of",
+        score: "Score:",
+        yourMission: "Your mission",
+        loading: "Loading an immersive historical scene...",
+        confirmGuess: "Confirm guess",
+        nextRound: "Next round",
+        seeFinal: "See final score",
+        chooseYear: "Choose the year",
+        threeThousandBC: "3000 BC",
+        twoZeroTwySixAD: "2026 AD",
+        roundResults: "results",
+        locationAccuracy: "Location accuracy",
+        away: "away",
+        whenHappened: "When it happened",
+        youWere: "You were",
+        years: "years",
+        off: "off",
+        perfect: "Perfect!",
+        year: "year",
+        locationScore: "Location Score",
+        timelineScore: "Timeline Score",
+        roundTotal: "Round Total",
+        generatingScene: "Generating an immersive historical scene for your next guess...",
+        unableToLoad: "Unable to load event. Refresh the page to try again.",
+        histoguessrComplete: "HistoGuessr Complete",
+        completedExpedition: "You completed the expedition. Your final tally measures how close you came to the true place and era of history's moments.",
+        totalPoints: "Total Points",
+        avgPerRound: "Avg per Round",
+        playAgain: "Play again",
+        fetchingScene: "Fetching your next historical scene",
+        noImageAvailable: "No image available",
+        correctLocation: "Correct location",
+        yourGuess: "Your guess",
+        homeSubtitle: "Choose a language and begin your historical adventure.",
+        startGame: "Start Game",
+        labelDifficulty: "Difficulty",
+        labelStyle: "Style",
+        optEasy: "Easy",
+        optMedium: "Medium",
+        optHard: "Hard",
+        optStory: "Story",
+        optClues: "Clues",
+        hintsTitle: "Hints",
+        hintLabel: "Hint",
+        hintPenalty: "Hint Penalty",
+        flipBackTip: "Tap card to go back",
+        labelTimeLimit: "Time",
+        optTimeNone: "No limit",
+      },
+      el: {
+        homeSubtitle: "Επιλέξτε γλώσσα και ξεκινήστε την ιστορική σας περιπέτεια.",
+        startGame: "Ξεκίνα",
+        round: "Γύρος",
+        of: "από",
+        score: "Βαθμολογία:",
+        yourMission: "Η αποστολή σας",
+        loading: "Φόρτωση μιας ενδελεχούς ιστορικής σκηνής...",
+        confirmGuess: "Επιβεβαίωση εικασίας",
+        nextRound: "Επόμενος γύρος",
+        seeFinal: "Δείτε την τελική βαθμολογία",
+        chooseYear: "Επιλέξτε το έτος",
+        threeThousandBC: "3000 π.Χ.",
+        twoZeroTwySixAD: "2026 μ.Χ.",
+        roundResults: "αποτελέσματα",
+        locationAccuracy: "Ακρίβεια τοποθεσίας",
+        away: "μακριά",
+        whenHappened: "Πότε έγινε",
+        youWere: "Ήσαστε",
+        years: "χρόνια",
+        off: "μακριά",
+        perfect: "Τέλειο!",
+        year: "χρόνο",
+        locationScore: "Βαθμός Τοποθεσίας",
+        timelineScore: "Βαθμός Χρονολογίας",
+        roundTotal: "Σύνολο Γύρου",
+        generatingScene: "Δημιουργία μιας ενδελεχούς ιστορικής σκηνής για την επόμενη εικασία σας...",
+        unableToLoad: "Δεν ήταν δυνατή η φόρτωση της εκδήλωσης. Ανανεώστε τη σελίδα για να προσπαθήσετε ξανά.",
+        histoguessrComplete: "HistoGuessr Ολοκληρώθηκε",
+        completedExpedition: "Ολοκληρώσατε την εκστρατεία. Η τελική σας βαθμολογία δείχνει πόσο κοντά είσαστε στο σωστό μέρος και εποχή των στιγμών της ιστορίας.",
+        totalPoints: "Σύνολο Βαθμών",
+        avgPerRound: "Μέσος ανά Γύρο",
+        playAgain: "Παίξτε ξανά",
+        fetchingScene: "Ανάκτηση της επόμενης ιστορικής σκηνής",
+        noImageAvailable: "Δεν υπάρχει εικόνα",
+        correctLocation: "Σωστή τοποθεσία",
+        yourGuess: "Η εικασία σας",
+        labelDifficulty: "Δυσκολία",
+        labelStyle: "Στυλ",
+        optEasy: "Εύκολο",
+        optMedium: "Μεσαίο",
+        optHard: "Δύσκολο",
+        optStory: "Αφήγηση",
+        optClues: "Κλειδιά",
+        hintsTitle: "Υποδείξεις",
+        hintLabel: "Υπόδειξη",
+        hintPenalty: "Ποινή Υπόδειξης",
+        flipBackTip: "Πατήστε για επιστροφή",
+        labelTimeLimit: "Χρόνος",
+        optTimeNone: "Χωρίς",
+      }
+    };
+
+    let currentLanguage = sessionStorage.getItem('histoLanguage') || 'el';
+    let currentDifficulty = 'medium';
+    let currentStyle = 'story';
+    const MAX_ROUNDS = 5;
+    const MAX_DISTANCE = 5000;
+    const MAX_YEAR_DIFF = 500;
+
+    const roundNumberEl = document.getElementById('round-number');
+    const scoreBadge = document.getElementById('score-badge');
+    const eventDesc = document.getElementById('event-description');
+    const yearSlider = document.getElementById('year-slider');
+    const yearLabel = document.getElementById('year-label');
+    const confirmButton = document.getElementById('confirm-button');
+    const resultsCard = document.getElementById('results-card');
+    const resultsContent = document.getElementById('results-content');
+    const finalScreen = document.getElementById('final-screen');
+    const finalScoreEl = document.getElementById('final-score');
+    const averageScoreEl = document.getElementById('average-score');
+    const restartButton = document.getElementById('restart-button');
+    const loadingOverlay = document.getElementById('loading');
+    const startScreen = document.getElementById('start-screen');
+    const homeSubtitle = document.getElementById('home-subtitle');
+    const homeLanguageToggle = document.getElementById('home-language-toggle');
+    const startButton = document.getElementById('start-button');
+
+    let map;
+    let playerMarker;
+    let actualMarker;
+    let resultLine = null;
+    let currentEvent = null;
+    let currentRound = 1;
+    let totalScore = 0;
+    let currentScore = 0;
+    let hintsUsed = 0;
+    let currentHints = [];
+    let nextEvent = null;       // resolved pre-fetched event data, ready to use instantly
+    let nextEventPromise = null; // in-flight pre-fetch promise
+    let currentTimeLimit = null; // null = no limit, or seconds (45/60/90/120)
+    let timerInterval = null;
+    let timerRemaining = 0;
+    let timerTotal = 0;
+
+    function startTimer() {
+      if (!currentTimeLimit) return;
+      timerTotal = currentTimeLimit;
+      timerRemaining = currentTimeLimit;
+      const wrap = document.getElementById('timer-wrap');
+      wrap.style.display = 'flex';
+      updateTimerDisplay();
+      timerInterval = setInterval(() => {
+        timerRemaining = Math.max(0, timerRemaining - 1);
+        updateTimerDisplay();
+        if (timerRemaining <= 0) {
+          clearInterval(timerInterval);
+          timerInterval = null;
+          handleTimerExpired();
+        }
+      }, 1000);
+    }
+
+    function stopTimer() {
+      if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+      const wrap = document.getElementById('timer-wrap');
+      if (wrap) wrap.style.display = 'none';
+      const timerText = document.getElementById('timer-text');
+      if (timerText) timerText.classList.remove('urgent');
+    }
+
+    function updateTimerDisplay() {
+      const timerText = document.getElementById('timer-text');
+      const timerBar = document.getElementById('timer-bar');
+      const mins = Math.floor(timerRemaining / 60);
+      const secs = timerRemaining % 60;
+      timerText.textContent = mins > 0
+        ? `${mins}:${secs.toString().padStart(2, '0')}`
+        : `${timerRemaining}s`;
+      const pct = timerTotal > 0 ? (timerRemaining / timerTotal) * 100 : 0;
+      timerBar.style.width = `${pct}%`;
+      if (pct > 50) {
+        timerBar.style.background = 'var(--accent)';
+        timerText.style.color = 'var(--text)';
+        timerText.classList.remove('urgent');
+      } else if (pct > 20) {
+        timerBar.style.background = '#e8a020';
+        timerText.style.color = '#e8a020';
+        timerText.classList.remove('urgent');
+      } else {
+        timerBar.style.background = '#e63946';
+        timerText.style.color = '#e63946';
+        timerText.classList.add('urgent');
+      }
+    }
+
+    function handleTimerExpired() {
+      if (resultsCard.classList.contains('visible')) return;
+      if (!playerMarker) {
+        const lat = (Math.random() * 140) - 70;
+        const lng = (Math.random() * 360) - 180;
+        placePlayerMarker(L.latLng(lat, lng));
+      }
+      confirmButton.click();
+    }
+
+    function getHintPenalty(n) {
+      return [0, 200, 600, 1200][Math.min(n, 3)];
+    }
+
+    const playerIcon = L.divIcon({
+      html: '<div class="player-pin"></div>',
+      className: '',
+      iconSize: [28, 28],
+      iconAnchor: [14, 14],
+      popupAnchor: [0, -16],
+    });
+
+    const actualIcon = L.divIcon({
+      html: '<div class="actual-pin"></div>',
+      className: '',
+      iconSize: [28, 28],
+      iconAnchor: [14, 14],
+      popupAnchor: [0, -16],
+    });
+
+    function t(key) {
+      return TRANSLATIONS[currentLanguage]?.[key] || TRANSLATIONS.en[key] || key;
+    }
+
+    function applyLanguageToggle() {
+      const toggle = document.getElementById('language-toggle');
+      const homeToggle = document.getElementById('home-language-toggle');
+      if (toggle) {
+        toggle.textContent = currentLanguage === 'en' ? 'ΕΛ' : 'EN';
+        toggle.style.backgroundColor = currentLanguage === 'en' ? 'rgba(201,168,76,0.2)' : 'rgba(27,73,101,0.5)';
+      }
+      if (homeToggle) {
+        homeToggle.textContent = currentLanguage === 'en' ? 'ΕΛ' : 'EN';
+      }
+    }
+
+    function updateUIText() {
+      eventDesc.textContent = t('loading');
+      if (document.querySelector('.card-title')) {
+        document.querySelector('.card-title').textContent = t('yourMission');
+      }
+      const sliderLabel = document.querySelector('.slider-row:first-child');
+      if (sliderLabel) {
+        sliderLabel.querySelector('span').textContent = t('chooseYear');
+      }
+      const sliderRange = document.querySelectorAll('.slider-row:last-child span');
+      if (sliderRange.length >= 2) {
+        sliderRange[0].textContent = t('threeThousandBC');
+        sliderRange[1].textContent = t('twoZeroTwySixAD');
+      }
+      confirmButton.textContent = t('confirmGuess');
+      const roundLabel = document.getElementById('round-label');
+      const roundOf = document.getElementById('round-of');
+      if (roundLabel) roundLabel.textContent = t('round');
+      if (roundOf) roundOf.textContent = t('of');
+      if (homeSubtitle) homeSubtitle.textContent = t('homeSubtitle');
+      if (startButton) startButton.textContent = t('startGame');
+      const hintsTitle = document.getElementById('hints-title');
+      if (hintsTitle) hintsTitle.textContent = t('hintsTitle');
+      const labelTimelimit = document.getElementById('label-timelimit');
+      if (labelTimelimit) labelTimelimit.textContent = t('labelTimeLimit');
+      const optTimeNoneBtn = document.getElementById('opt-time-none');
+      if (optTimeNoneBtn) optTimeNoneBtn.textContent = t('optTimeNone');
+      const labelDiff = document.getElementById('label-difficulty');
+      const labelSty = document.getElementById('label-style');
+      if (labelDiff) labelDiff.textContent = t('labelDifficulty');
+      if (labelSty) labelSty.textContent = t('labelStyle');
+      const optEasyBtn = document.getElementById('opt-easy');
+      const optMedBtn = document.getElementById('opt-medium');
+      const optHardBtn = document.getElementById('opt-hard');
+      const optStoryBtn = document.getElementById('opt-story');
+      const optCluesBtn = document.getElementById('opt-clues');
+      if (optEasyBtn) optEasyBtn.textContent = t('optEasy');
+      if (optMedBtn) optMedBtn.textContent = t('optMedium');
+      if (optHardBtn) optHardBtn.textContent = t('optHard');
+      if (optStoryBtn) optStoryBtn.textContent = t('optStory');
+      if (optCluesBtn) optCluesBtn.textContent = t('optClues');
+      updateGameModeBadge();
+      applyLanguageToggle();
+    }
+
+    function updateGameModeBadge() {
+      const badge = document.getElementById('game-mode-badge');
+      if (!badge) return;
+      const diffLabels = { easy: t('optEasy'), medium: t('optMedium'), hard: t('optHard') };
+      const styleLabels = { story: t('optStory'), clues: t('optClues') };
+      badge.textContent = `${diffLabels[currentDifficulty]} · ${styleLabels[currentStyle]}`;
+    }
+
+    function formatYear(value) {
+      const numeric = Number(value);
+      if (numeric < 0) {
+        return `${Math.abs(numeric)} ${currentLanguage === 'el' ? 'π.Χ.' : 'BC'}`;
+      }
+      if (numeric === 0) {
+        return currentLanguage === 'el' ? '1 π.Χ. / 1 μ.Χ.' : '1 BC / 1 AD';
+      }
+      return `${numeric} ${currentLanguage === 'el' ? 'μ.Χ.' : 'AD'}`;
+    }
+
+    function updateYearLabel() {
+      yearLabel.textContent = formatYear(yearSlider.value);
+    }
+
+    function setLoading(visible) {
+      loadingOverlay.style.display = visible ? 'flex' : 'none';
+    }
+
+    function setRoundText() {
+      roundNumberEl.textContent = currentRound;
+      scoreBadge.textContent = `${t('score')} ${totalScore}`;
+    }
+
+    function resetRoundState() {
+      stopTimer();
+      currentEvent = null;
+      hintsUsed = 0;
+      currentHints = [];
+      document.getElementById('event-card-inner').classList.remove('flipped');
+      document.getElementById('hints-content').innerHTML = '';
+      document.getElementById('hint-counter').textContent = '0 / 3';
+      document.getElementById('hint-penalty-notice').style.display = 'none';
+      document.getElementById('hint-btn').disabled = false;
+      document.getElementById('hint-btn-back').disabled = false;
+      confirmButton.disabled = !playerMarker;
+      resultsCard.classList.remove('visible');
+      resultsContent.innerHTML = '';
+      if (actualMarker) {
+        map.removeLayer(actualMarker);
+        actualMarker = null;
+      }
+      if (resultLine) {
+        map.removeLayer(resultLine);
+        resultLine = null;
+      }
+    }
+
+    function placePlayerMarker(latlng) {
+      if (playerMarker) {
+        playerMarker.setLatLng(latlng);
+      } else {
+        playerMarker = L.marker(latlng, { icon: playerIcon, draggable: true }).addTo(map);
+        playerMarker.bindPopup(t('yourGuess'));
+        playerMarker.on('dragend', () => {
+          confirmButton.disabled = false;
+        });
+      }
+      confirmButton.disabled = false;
+    }
+
+    function initializeMap() {
+      map = L.map('map', {
+        minZoom: 2,
+        maxZoom: 18,
+        zoomSnap: 0.5,
+        zoomDelta: 2,
+        wheelPxPerZoomLevel: 20,
+        scrollWheelZoom: true,
+        inertia: true,
+      }).setView([20, 0], 2);
+
+      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/NatGeo_World_Map/MapServer/tile/{z}/{y}/{x}', {
+        attribution: '&copy; Esri, National Geographic, DeLorme, HERE, UNEP-WCMC, USGS, NASA, ESA, METI, NRCAN, GEBCO, NOAA, iPC',
+        maxZoom: 16,
+      }).addTo(map);
+
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}{r}.png', {
+        attribution: '',
+        maxZoom: 18,
+        opacity: 0.85,
+      }).addTo(map);
+
+      map.on('click', (event) => {
+        placePlayerMarker(event.latlng);
+      });
+    }
+
+    async function fetchEvent() {
+      setLoading(true);
+      try {
+        const response = await fetch(`/generate-event?language=${currentLanguage}`, {
+          method: 'POST',
+          cache: 'no-store',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ round: currentRound, nonce: `${Date.now()}-${Math.random()}`, difficulty: currentDifficulty, style: currentStyle }),
+        });
+        if (!response.ok) {
+          throw new Error('Unable to load event description.');
+        }
+        const data = await response.json();
+        console.log('generate-event response', data);
+        return data;
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    function prefetchNextEvent() {
+      nextEvent = null;
+      nextEventPromise = fetch(`/generate-event?language=${currentLanguage}`, {
+        method: 'POST',
+        cache: 'no-store',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          round: currentRound + 1,
+          nonce: `${Date.now()}-${Math.random()}`,
+          difficulty: currentDifficulty,
+          style: currentStyle,
+        }),
+      })
+      .then(r => { if (!r.ok) throw new Error('prefetch HTTP ' + r.status); return r.json(); })
+      .then(data => { nextEvent = data; console.log('Pre-fetched:', data.event_name_en); return data; })
+      .catch(err => { console.warn('Pre-fetch failed, will load fresh:', err); nextEvent = null; return null; });
+    }
+
+    async function fetchWiki(query) {
+      try {
+        const url = `/wiki-image?query=${encodeURIComponent(query)}`;
+        console.log('Fetching wiki image URL:', url);
+        const response = await fetch(url);
+        if (!response.ok) {
+          console.log('wiki-image fetch failed:', response.status);
+          return null;
+        }
+        const data = await response.json();
+        console.log('wiki-image returned', data);
+        return data;
+      } catch (err) {
+        console.error('wiki-image fetch error', err);
+        return null;
+      }
+    }
+
+    function getDistanceKm(lat1, lon1, lat2, lon2) {
+      const R = 6371;
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLon = (lon2 - lon1) * Math.PI / 180;
+      const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c;
+    }
+
+    function calculateScore(distance, yearDiff) {
+      const locationScore = Math.round(2500 * Math.exp(-distance / 1000));
+      const yearScore = Math.round(2500 * Math.exp(-yearDiff / 500));
+      const hintPenalty = getHintPenalty(hintsUsed);
+      const total = Math.max(0, locationScore + yearScore - hintPenalty);
+      return { locationScore, yearScore, hintPenalty, total };
+    }
+
+    function createStatisticsSection(title, value, description) {
+      return `<div style="margin-bottom: 12px;"><strong style="color: var(--accent);">${value}</strong><div style="color: var(--text-soft);font-size:0.95rem">${title}</div><div style="color: var(--text-soft);margin-top:6px;font-size:0.9rem;">${description}</div></div>`;
+    }
+
+    async function showResults() {
+      stopTimer();
+      document.getElementById('event-card-inner').classList.remove('flipped');
+      document.getElementById('hint-btn').disabled = true;
+      document.getElementById('hint-btn-back').disabled = true;
+
+      const actualCoords = [currentEvent.lat, currentEvent.lng];
+      const guessedLatLng = playerMarker.getLatLng();
+      const userYear = Number(yearSlider.value);
+      const actualYear = Number(currentEvent.year);
+      const yearDiff = Math.abs(userYear - actualYear);
+      const distance = getDistanceKm(guessedLatLng.lat, guessedLatLng.lng, actualCoords[0], actualCoords[1]);
+      const score = calculateScore(distance, yearDiff);
+      currentScore = score.total;
+      totalScore += score.total;
+      setRoundText();
+
+      const imageQuery = currentEvent?.event_name_en || currentEvent?.event_name;
+      console.log('English name for wiki:', currentEvent.event_name_en);
+      const wiki = await fetchWiki(imageQuery);
+      console.log('Wiki image result', wiki, 'event:', imageQuery);
+      const imageMarkup = wiki?.image
+        ? `<img src="${wiki.image}" alt="${wiki.title || currentEvent.event_name}" style="width:100%;border-radius:18px;object-fit:cover;min-height:180px;" />`
+        : `<div style="border-radius: 18px;min-height: 180px;background: rgba(232,224,208,0.08);display:flex;align-items:center;justify-content:center;color:var(--text-soft);font-size:1rem;text-align:center;padding:16px;">${currentEvent.event_name || (currentLanguage === 'el' ? 'Χωρίς εικόνα' : 'No image')}</div>`;
+
+      const yearDisplay = currentEvent.bc ? `${Math.abs(actualYear)} ${currentLanguage === 'el' ? 'π.Χ.' : 'BC'}` : `${actualYear} ${currentLanguage === 'el' ? 'μ.Χ.' : 'AD'}`;
+      const yearErrorText = yearDiff === 0 ? t('perfect') : `${t('youWere')} ${yearDiff} ${yearDiff !== 1 ? t('years') : t('year')} ${t('off')}`;
+
+      resultsContent.innerHTML = `
+        ${imageMarkup}
+        <p style="font-size:0.85rem; color:#c8bfa8; margin-top:10px; line-height:1.5; padding: 8px 0;">${currentEvent.summary || ''}</p>
+        <h2 class="card-title" style="margin-top: 20px;">${t('round')} ${currentRound} ${t('roundResults')}</h2>
+        <div style="margin-top:18px;">
+          <div style="margin-bottom: 16px;">
+            <div style="font-size: 0.95rem; color: var(--text-soft); margin-bottom: 8px;">${t('locationAccuracy')}</div>
+            <div style="color: var(--text-soft); font-size: 0.9rem;"><strong style="color: var(--accent);">${distance.toFixed(1)} km</strong> ${t('away')}</div>
+          </div>
+          <div style="margin-bottom: 16px;">
+            <div style="font-size: 0.95rem; color: var(--text-soft); margin-bottom: 8px;">${t('whenHappened')}</div>
+            <div style="font-size: 1.8rem; font-weight: 700; color: var(--accent); margin-bottom: 4px;">${yearDisplay}</div>
+            <div style="color: var(--text-soft); font-size: 0.9rem;">${yearErrorText}</div>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 16px;">
+            <div style="background: rgba(255,255,255,0.05); border-radius: 12px; padding: 12px;">
+              <div style="font-size: 0.85rem; color: var(--text-soft); margin-bottom: 4px;">${t('locationScore')}</div>
+              <div style="font-size: 1.3rem; font-weight: 700; color: var(--accent);">${score.locationScore}</div>
+            </div>
+            <div style="background: rgba(255,255,255,0.05); border-radius: 12px; padding: 12px;">
+              <div style="font-size: 0.85rem; color: var(--text-soft); margin-bottom: 4px;">${t('timelineScore')}</div>
+              <div style="font-size: 1.3rem; font-weight: 700; color: var(--accent);">${score.yearScore}</div>
+            </div>
+          </div>
+          ${score.hintPenalty > 0 ? `
+          <div style="background: rgba(230,57,70,0.1); border-radius: 12px; padding: 12px; margin-top: 8px; border-left: 3px solid #e63946;">
+            <div style="font-size: 0.85rem; color: var(--text-soft); margin-bottom: 4px;">${t('hintPenalty')} (${hintsUsed}x 💡)</div>
+            <div style="font-size: 1.3rem; font-weight: 700; color: #e67d7d;">−${score.hintPenalty}</div>
+          </div>` : ''}
+          <div style="background: rgba(201,168,76,0.15); border-radius: 12px; padding: 14px; margin-top: 8px; border-left: 3px solid var(--accent);">
+            <div style="font-size: 1.4rem; font-weight: 700; color: var(--accent);">${score.total}</div>
+            <div style="font-size: 0.9rem; color: var(--text-soft);">${t('roundTotal')}</div>
+          </div>
+        </div>
+      `;
+      resultsCard.classList.add('visible');
+
+      if (resultLine) {
+        map.removeLayer(resultLine);
+        resultLine = null;
+      }
+      if (actualMarker) {
+        map.removeLayer(actualMarker);
+      }
+      actualMarker = L.marker(actualCoords, { icon: actualIcon }).addTo(map);
+      actualMarker.bindPopup(t('correctLocation')).openPopup();
+
+      resultLine = L.polyline([guessedLatLng, actualCoords], {
+        color: '#d4b76c',
+        weight: 4,
+        opacity: 0.8,
+        dashArray: '8, 6',
+      }).addTo(map);
+
+      const bounds = L.latLngBounds([guessedLatLng, actualCoords]);
+      map.fitBounds(bounds.pad(0.15), { animate: true, duration: 1.0 });
+
+      if (currentRound < MAX_ROUNDS) {
+        setTimeout(() => {
+          confirmButton.textContent = t('nextRound');
+          confirmButton.disabled = false;
+        }, 250);
+      } else {
+        confirmButton.textContent = t('seeFinal');
+        confirmButton.disabled = false;
+      }
+    }
+
+    async function startRound() {
+      setRoundText();
+      resetRoundState();
+      if (playerMarker) {
+        map.removeLayer(playerMarker);
+        playerMarker = null;
+      }
+      confirmButton.textContent = t('confirmGuess');
+      confirmButton.disabled = true;
+      yearSlider.value = 2026;
+      updateYearLabel();
+
+      // Grab and clear the pre-fetch state before any await so a concurrent
+      // prefetch can't clobber the slot we're about to use.
+      const cachedEvent = nextEvent;
+      const cachedPromise = nextEventPromise;
+      nextEvent = null;
+      nextEventPromise = null;
+
+      try {
+        let eventData;
+
+        if (cachedEvent) {
+          // Pre-fetch already resolved — instant, no loading screen needed
+          eventData = cachedEvent;
+        } else if (cachedPromise) {
+          // Pre-fetch still in flight — wait for it, show loading
+          eventDesc.textContent = currentLanguage === 'el' ? 'Φόρτωση...' : 'Loading...';
+          setLoading(true);
+          eventData = await cachedPromise;
+          setLoading(false);
+          if (!eventData) eventData = await fetchEvent(); // fallback if prefetch failed
+        } else {
+          // First round or no pre-fetch — normal load
+          eventDesc.textContent = currentLanguage === 'el' ? 'Φόρτωση...' : 'Loading...';
+          eventData = await fetchEvent();
+        }
+
+        currentEvent = eventData;
+        currentHints = Array.isArray(currentEvent.hints) ? currentEvent.hints : [];
+        eventDesc.textContent = currentEvent.description || (currentLanguage === 'el' ? 'Μια μυστηριακή ιστορική εκδήλωση έχει εμφανιστεί.' : 'A mysterious historical event has appeared.');
+
+        if (currentEvent.lat && currentEvent.lng) {
+          map.flyTo([currentEvent.lat, currentEvent.lng], 2, { duration: 1.4 });
+        }
+
+        startTimer();
+
+        // Start pre-fetching the next round immediately after this one is displayed
+        if (currentRound < MAX_ROUNDS) {
+          prefetchNextEvent();
+        }
+      } catch (err) {
+        setLoading(false);
+        eventDesc.textContent = t('unableToLoad');
+        console.error(err);
+      }
+    }
+
+    confirmButton.addEventListener('click', async () => {
+      if (!playerMarker) return;
+      confirmButton.disabled = true;
+      if (resultsCard.classList.contains('visible')) {
+        if (currentRound >= MAX_ROUNDS) {
+          finalScoreEl.textContent = totalScore;
+          averageScoreEl.textContent = Math.round(totalScore / MAX_ROUNDS);
+          const finalTitle = finalScreen.querySelector('h1');
+          const finalDesc = finalScreen.querySelector('p');
+          const statLabels = finalScreen.querySelectorAll('.stat-card');
+          if (finalTitle) {
+            finalTitle.textContent = t('histoguessrComplete');
+          }
+          if (finalDesc) {
+            finalDesc.textContent = t('completedExpedition');
+          }
+          if (statLabels.length >= 2) {
+            statLabels[0].innerHTML = `<strong id="final-score">${totalScore}</strong>${t('totalPoints')}`;
+            statLabels[1].innerHTML = `<strong id="average-score">${Math.round(totalScore / MAX_ROUNDS)}</strong>${t('avgPerRound')}`;
+          }
+          restartButton.textContent = t('playAgain');
+          finalScreen.classList.add('visible');
+          return;
+        }
+        currentRound += 1;
+        await startRound();
+        return;
+      }
+      await showResults();
+    });
+
+    yearSlider.addEventListener('input', updateYearLabel);
+
+    const languageToggle = document.getElementById('language-toggle');
+    if (languageToggle) {
+      languageToggle.addEventListener('click', () => {
+        currentLanguage = currentLanguage === 'en' ? 'el' : 'en';
+        applyLanguageToggle();
+        updateUIText();
+      });
+    }
+
+    if (homeLanguageToggle) {
+      homeLanguageToggle.addEventListener('click', () => {
+        currentLanguage = currentLanguage === 'en' ? 'el' : 'en';
+        sessionStorage.setItem('histoLanguage', currentLanguage);
+        applyLanguageToggle();
+        updateUIText();
+      });
+    }
+
+    restartButton.addEventListener('click', () => {
+      totalScore = 0;
+      currentRound = 1;
+      nextEvent = null;
+      nextEventPromise = null;
+      finalScreen.classList.remove('visible');
+      startRound();
+    });
+
+    function showStartScreen() {
+      if (startScreen) {
+        startScreen.style.display = 'flex';
+      }
+    }
+
+    function hideStartScreen() {
+      if (startScreen) {
+        startScreen.style.display = 'none';
+      }
+    }
+
+    window.addEventListener('load', async () => {
+      initializeMap();
+      updateYearLabel();
+      applyLanguageToggle();
+      updateUIText();
+      showStartScreen();
+    });
+
+    if (startButton) {
+      startButton.addEventListener('click', () => {
+        hideStartScreen();
+        startRound();
+      });
+    }
+
+    function revealNextHint() {
+      const hintsContent = document.getElementById('hints-content');
+      const hintCounter = document.getElementById('hint-counter');
+      const hintPenaltyNotice = document.getElementById('hint-penalty-notice');
+      const hintBtnBack = document.getElementById('hint-btn-back');
+
+      if (hintsUsed >= 3 || hintsUsed >= currentHints.length) return;
+
+      hintsUsed++;
+      const hint = currentHints[hintsUsed - 1];
+
+      const item = document.createElement('div');
+      item.className = 'hint-item';
+      const label = document.createElement('span');
+      label.className = 'hint-item-label';
+      label.textContent = `${t('hintLabel')} ${hintsUsed}`;
+      item.appendChild(label);
+      item.appendChild(document.createTextNode(hint));
+      hintsContent.appendChild(item);
+
+      const penalty = getHintPenalty(hintsUsed);
+      hintCounter.textContent = `${hintsUsed} / 3`;
+      hintPenaltyNotice.style.display = 'block';
+      hintPenaltyNotice.textContent = `−${penalty} ${t('hintPenalty').toLowerCase()}`;
+
+      if (hintsUsed >= 3 || hintsUsed >= currentHints.length) {
+        hintBtnBack.disabled = true;
+      }
+    }
+
+    // Front 💡 — flip to hints side only, never auto-reveal
+    document.getElementById('hint-btn').addEventListener('click', () => {
+      if (!currentEvent) return;
+      document.getElementById('event-card-inner').classList.add('flipped');
+    });
+
+    // Back 💡 — reveal the next hint without flipping
+    document.getElementById('hint-btn-back').addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!currentEvent) return;
+      revealNextHint();
+    });
+
+    document.getElementById('event-card-back').addEventListener('click', (e) => {
+      if (!e.target.closest('#hint-btn-back')) {
+        document.getElementById('event-card-inner').classList.remove('flipped');
+      }
+    });
+
+    ['easy', 'medium', 'hard'].forEach(d => {
+      const btn = document.getElementById(`opt-${d}`);
+      if (!btn) return;
+      btn.addEventListener('click', () => {
+        currentDifficulty = d;
+        ['easy', 'medium', 'hard'].forEach(x => document.getElementById(`opt-${x}`).classList.remove('active'));
+        btn.classList.add('active');
+        updateGameModeBadge();
+      });
+    });
+
+    ['story', 'clues'].forEach(s => {
+      const btn = document.getElementById(`opt-${s}`);
+      if (!btn) return;
+      btn.addEventListener('click', () => {
+        currentStyle = s;
+        ['story', 'clues'].forEach(x => document.getElementById(`opt-${x}`).classList.remove('active'));
+        btn.classList.add('active');
+        updateGameModeBadge();
+      });
+    });
+
+    const TIME_LIMIT_OPTIONS = [
+      { id: 'opt-time-45',  value: 45  },
+      { id: 'opt-time-60',  value: 60  },
+      { id: 'opt-time-90',  value: 90  },
+      { id: 'opt-time-120', value: 120 },
+      { id: 'opt-time-none',value: null },
+    ];
+    TIME_LIMIT_OPTIONS.forEach(({ id, value }) => {
+      const btn = document.getElementById(id);
+      if (!btn) return;
+      btn.addEventListener('click', () => {
+        currentTimeLimit = value;
+        TIME_LIMIT_OPTIONS.forEach(opt => document.getElementById(opt.id).classList.remove('active'));
+        btn.classList.add('active');
+      });
+    });
+  </script>
+</body>
+</html>
